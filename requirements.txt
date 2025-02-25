@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+neo4j
+weaviate-client>=4.0.0
+celery
+redis
+autogen
+requests
+pytest

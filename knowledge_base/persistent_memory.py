@@ -1,16 +1,19 @@
 # knowledge_base/persistent_memory.py
 
 import weaviate
+from weaviate import WeaviateClient
+from weaviate.connect import ConnectionParams  # Required for v4
 import json
-import uuid
 
 class PersistentMemory:
     """
-    Implements a long-term AI memory system using Weaviate.
+    Implements a long-term AI memory system using Weaviate v4.0.
     """
 
     def __init__(self, url="http://localhost:8080"):
-        self.client = weaviate.Client(url)
+        # Fix: Use ConnectionParams.from_url() instead of from_http()
+        connection_params = ConnectionParams.from_url(url)
+        self.client = WeaviateClient(connection_params)
 
         # Ensure memory schema exists
         self._initialize_schema()
@@ -20,53 +23,57 @@ class PersistentMemory:
         Initializes the memory storage schema in Weaviate.
         """
         schema = {
-            "classes": [
-                {
-                    "class": "Memory",
-                    "description": "Long-term AI memory storage",
-                    "properties": [
-                        {
-                            "name": "content",
-                            "dataType": ["text"],
-                            "description": "Stored knowledge content"
-                        },
-                        {
-                            "name": "metadata",
-                            "dataType": ["text"],
-                            "description": "Metadata about stored knowledge"
-                        }
-                    ]
-                }
-            ]
+            "class": "Memory",
+            "description": "Long-term AI memory storage",
+            "properties": [
+                {"name": "content", "dataType": ["text"], "description": "Stored knowledge content"},
+                {"name": "metadata", "dataType": ["text"], "description": "Metadata about stored knowledge"},
+            ],
         }
+
         try:
-            self.client.schema.create(schema)
-        except weaviate.exceptions.WeaviateBaseError:
-            print("Memory schema already exists.")
+            if "Memory" not in self.client.schema.get()["classes"]:
+                self.client.schema.create_class(schema)
+        except weaviate.WeaviateBaseError as e:
+            print(f"Error initializing schema: {e}")
 
     def store_memory(self, content, metadata=None):
         """
         Stores long-term AI memory as a vectorized document.
         """
         memory_data = {
-            "content": content,
-            "metadata": json.dumps(metadata) if metadata else "{}"
+            "class": "Memory",
+            "properties": {
+                "content": content,
+                "metadata": json.dumps(metadata) if metadata else "{}",
+            },
         }
-        self.client.data_object.create(memory_data, "Memory")
+        try:
+            self.client.data.insert(memory_data)
+        except weaviate.WeaviateBaseError as e:
+            print(f"Error storing memory: {e}")
 
     def retrieve_memory(self, query):
         """
         Retrieves relevant memory content based on semantic similarity.
         """
-        query_result = self.client.query.get("Memory", ["content", "metadata"]).with_near_text({"concepts": [query]}).do()
-        
-        if query_result and "data" in query_result:
-            return query_result["data"]["Get"]["Memory"]
-        return []
+        try:
+            response = (
+                self.client.query
+                .get("Memory", ["content", "metadata"])
+                .with_near_text({"concepts": [query]})
+                .do()
+            )
+            return response.get("data", {}).get("Get", {}).get("Memory", [])
+        except weaviate.WeaviateBaseError as e:
+            print(f"Error retrieving memory: {e}")
+            return []
 
     def clear_memory(self):
         """
         Deletes all stored memory.
         """
-        self.client.schema.delete_all()
-
+        try:
+            self.client.schema.delete_class("Memory")
+        except weaviate.WeaviateBaseError as e:
+            print(f"Error clearing memory: {e}")
